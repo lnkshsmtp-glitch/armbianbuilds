@@ -9,7 +9,7 @@ jobs:
       - uses: armbian/build@main
         with:
           armbian_token: ${{ secrets.GITHUB_TOKEN }}
-          armbian_board: "rock646" # orangepi5 bananapif3
+          armbian_board: "rock64" # orangepi5 bananapif3
           armbian_release: "trixie" # trixie
           armbian_target: "build"
           armbian_kernel_branch: "current"
