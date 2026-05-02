@@ -9,9 +9,9 @@ jobs:
       - uses: armbian/build@main
         with:
           armbian_token: ${{ secrets.GITHUB_TOKEN }}
-          armbian_board: "NanoPC T6" # orangepi5 bananapif3
+          armbian_board: "nanopct6" # orangepi5 bananapif3
           armbian_release: "trixie" # trixie
           armbian_target: "build"
           armbian_kernel_branch: "vendor"
-          armbian_ui: "budgie" # server xfce
+          armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
