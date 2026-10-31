@@ -12,6 +12,6 @@ jobs:
           armbian_board: "nanopct6" # orangepi5 bananapif3
           armbian_release: "trixie" # trixie
           armbian_target: "build"
-          armbian_kernel_branch: "vendor"
+          armbian_kernel_branch: "current"
           armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
