@@ -4,9 +4,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # ubuntu-24.04-arm, ubuntu-24.04-riscv
+    runs-on: ubuntu-latest
     steps:
-      - uses: armbian/build@main
+      # Step 1: Checkout your repository so the action can see the userpatches/ folder
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Run the Armbian build framework for a full OS image
+      - name: Build Full Image
+        uses: armbian/build@main
         with:
           armbian_token: ${{ secrets.GITHUB_TOKEN }}
           armbian_board: "nanopct6" # orangepi5 bananapif3
@@ -15,3 +21,7 @@ jobs:
           armbian_kernel_branch: "current"
           armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
+
+          # Appends your configuration argument to the build command line
+          # This forces the framework to load userpatches/config-mybuild.conf
+          armbian_extra_args: "mybuild" 
