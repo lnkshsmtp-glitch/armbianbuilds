@@ -21,3 +21,12 @@ jobs:
           armbian_kernel_branch: "current"
           armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
+
+          # Using an inline hook argument to inject the package directly 
+          # inside the runner's build process without needing pre-existing files.
+          armbian_extra_vars: |
+            inline_customize_image() {
+              echo "Injecting custom matching kernel headers..."
+              apt-get update
+              apt-get install -y linux-headers-current-rockchip64
+            }
