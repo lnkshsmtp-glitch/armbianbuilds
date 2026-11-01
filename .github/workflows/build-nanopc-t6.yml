@@ -21,9 +21,3 @@ jobs:
           armbian_kernel_branch: "current"
           armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
-
-          # FIX: Change armbian_extra_args to armbian_config_name
-          armbian_config_name: "mybuild"
-          
-          # Enables the extension script we added
-          armbian_extensions: "install-headers" 
