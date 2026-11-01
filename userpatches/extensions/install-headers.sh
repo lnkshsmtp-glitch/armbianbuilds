@@ -7,22 +7,23 @@
 function post_armbian_repo_customize_image() {
     display_alert "Custom Extension" "Injecting matching kernel headers..." "info"
 
-    # 1. Locate the exact headers package we just compiled for this specific build
-    # $CHOSEN_KERNEL will be "current", $LINUXFAMILY will be "rockchip64"
-    local headers_deb=$(ls -1 ${DEB_DIR}/linux-headers-${CHOSEN_KERNEL}-${LINUXFAMILY}_*.deb 2>/dev/null | head -n 1)
+    # Strict filtering: Find only actual files ending in .deb matching our package naming scheme
+    local headers_deb=$(find "${DEB_DIR}" -maxdepth 2 -type f -name "linux-headers-${CHOSEN_KERNEL}-${LINUXFAMILY}_*.deb" 2>/dev/null | head -n 1)
 
-    if [ -f "$headers_deb" ]; then
-        display_alert "Custom Extension" "Found compiled headers: $(basename $headers_deb)" "info"
+    if [ -n "$headers_deb" ] && [ -f "$headers_deb" ]; then
+        display_alert "Custom Extension" "Found valid compiled headers: $(basename "$headers_deb")" "info"
         
-        # 2. Copy the .deb safely into the mounted image's temporary directory
+        # Copy the .deb safely into the mounted image's temporary directory
         cp "$headers_deb" "${SDCARD}/tmp/"
 
-        # 3. Chroot into the image and force-install that specific package file
-        chroot "${SDCARD}" /bin/bash -c "dpkg -i /tmp/$(basename $headers_deb)"
+        # Chroot into the image and force-install that specific package file
+        chroot "${SDCARD}" /bin/bash -c "dpkg -i /tmp/$(basename "$headers_deb")"
         
-        # 4. Clean up the installer package from the image filesystem
-        rm "${SDCARD}/tmp/$(basename $headers_deb)"
+        # Clean up the installer package from the image filesystem
+        rm "${SDCARD}/tmp/$(basename "$headers_deb")"
     else
-        display_alert "Custom Extension" "Could not find matching compiled headers in ${DEB_DIR}" "warning"
+        display_alert "Custom Extension" "Could not find a valid matching .deb headers package in ${DEB_DIR}" "error"
+        # Optional: List files in the directory to help debug if it fails
+        ls -la "${DEB_DIR}"
     fi
 }
