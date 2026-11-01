@@ -25,3 +25,5 @@ jobs:
           # Appends your configuration argument to the build command line
           # This forces the framework to load userpatches/config-mybuild.conf
           armbian_extra_args: "mybuild" 
+          # Enables the extension script we just added
+          armbian_extensions: "install-headers"
