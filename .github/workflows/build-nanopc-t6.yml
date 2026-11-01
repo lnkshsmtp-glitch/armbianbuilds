@@ -10,6 +10,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Step 2: Natively fix the GitHub UI permission restriction
+      - name: Make customization script executable
+        run: |
+          if [ -f userpatches/customize-image.sh ]; then
+            chmod +x userpatches/customize-image.sh
+            echo "Successfully applied executable bit (+x) to customize-image.sh"
+          else
+            echo "Error: userpatches/customize-image.sh not found in repository layout!"
+            exit 1
+          fi
+
       # Step 2: Run the Armbian build framework for a full OS image
       - name: Build Full Image
         uses: armbian/build@main
@@ -21,12 +32,3 @@ jobs:
           armbian_kernel_branch: "current"
           armbian_ui: "gnome" # server xfce
           armbian_runner_clean: "yes" # recommended for Github runners
-
-          # Using an inline hook argument to inject the package directly 
-          # inside the runner's build process without needing pre-existing files.
-          armbian_extra_vars: |
-            inline_customize_image() {
-              echo "Injecting custom matching kernel headers..."
-              apt-get update
-              apt-get install -y linux-headers-current-rockchip64
-            }
