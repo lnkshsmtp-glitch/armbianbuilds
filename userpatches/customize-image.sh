@@ -58,13 +58,24 @@ gasket
 apex
 EOF
 
-echo "=== [5/5] Installing Edge TPU userspace runtime (libedgetpu1-std) ==="
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/coral-edgetpu.gpg
-echo "deb [signed-by=/etc/apt/keyrings/coral-edgetpu.gpg] https://packages.cloud.google.com/apt coral-edgetpu-stable main" \
-    > /etc/apt/sources.list.d/coral-edgetpu.list
+echo "=== [5/5] Installing Edge TPU runtime (feranick/libedgetpu for Trixie arm64) ==="
+# Clean up any leftover Google APT repo file if present
+rm -f /etc/apt/sources.list.d/coral-edgetpu.list /etc/apt/keyrings/coral-edgetpu.gpg
 
 apt-get update
-apt-get install -y libedgetpu1-std
-rm -rf /tmp/gasket-driver
+apt-get install -y libusb-1.0-0 libgcc-s1
+
+EDGETPU_DEB_URL="https://github.com/feranick/libedgetpu/releases/download/16.0TF2.19.1-1/libedgetpu1-std_16.0tf2.19.1-1.trixie_arm64.deb"
+curl -fL "${EDGETPU_DEB_URL}" -o /tmp/libedgetpu1-std.deb
+
+# Update legacy libgcc1 dependency name to libgcc-s1 for Debian Trixie APT compatibility
+rm -rf /tmp/edgetpu-pkg
+dpkg-deb -R /tmp/libedgetpu1-std.deb /tmp/edgetpu-pkg
+sed -i 's/libgcc1/libgcc-s1/g' /tmp/edgetpu-pkg/DEBIAN/control
+dpkg-deb -b /tmp/edgetpu-pkg /tmp/libedgetpu1-std-trixie.deb
+
+apt-get install -y /tmp/libedgetpu1-std-trixie.deb
+ldconfig
+
+rm -rf /tmp/gasket-driver /tmp/libedgetpu1-std.deb /tmp/libedgetpu1-std-trixie.deb /tmp/edgetpu-pkg
+echo "=== [Coral TPU] Setup Complete ==="
