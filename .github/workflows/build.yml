@@ -38,10 +38,10 @@ jobs:
           sudo apt-get install -y b4 git
 
           PATCH_DEST="userpatches/kernel/archive/rockchip64-6.18"
-          mkdir -p "${PATCH_DEST}"
+          mkdir -p "${PATCH_DEST}" /tmp/rocket-dvfs /tmp/rocket-split
 
-          b4 am -o /tmp/rocket-dvfs 20260922080114.44662-1-royalnet026@gmail.com
-          git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/*.mbx
+          b4 am --no-cover -o /tmp/rocket-dvfs -n series.mbx 20260922080114.44662-1-royalnet026@gmail.com
+          git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/series.mbx
           for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
             num=$(basename "$f")
             mv "$f" "${PATCH_DEST}/zz-rocket-dvfs-${num}.patch"
