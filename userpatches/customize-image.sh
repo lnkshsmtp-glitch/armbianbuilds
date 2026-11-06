@@ -81,12 +81,10 @@ deb http://deb.debian.org/debian trixie-backports main contrib non-free non-free
 EOF
 
 apt-get update
-# Upgrade Mesa stack from trixie-backports if newer versions exist for Panthor/PanVK 1.4
 apt-get install -y -t trixie-backports \
     libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libgbm1 \
     mesa-vulkan-drivers mesa-va-drivers || true
 
-# Ensure Mali-G610 CSF firmware is present before initramfs generation
 mkdir -p /lib/firmware/arm/mali/arch10.8
 if [ ! -f /lib/firmware/arm/mali/arch10.8/mali_csffw.bin ]; then
     curl -fsSL "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/arm/mali/arch10.8/mali_csffw.bin" \
@@ -94,13 +92,11 @@ if [ ! -f /lib/firmware/arm/mali/arch10.8/mali_csffw.bin ]; then
 fi
 cp /lib/firmware/arm/mali/arch10.8/mali_csffw.bin /lib/firmware/mali_csffw.bin
 
-echo "=== [5/7] Configuring GNOME Mutter GPU rules, VPU permissions, and Boot Env ==="
-# Force GNOME Mutter to select panthor as the primary 3D GPU
+echo "=== [5/7] Configuring GNOME Mutter GPU rules and VPU permissions ==="
 cat << 'EOF' > /etc/udev/rules.d/61-mutter-panthor.rules
 SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="panthor", TAG+="mutter-device-preferred-primary"
 EOF
 
-# Grant video/render groups access to V4L2 stateless, RKMPP, RGA, DMA-Heap, and NPU nodes
 cat << 'EOF' > /etc/udev/rules.d/99-rk3588-vpu-npu.rules
 KERNEL=="mpp_service", MODE="0660", GROUP="video"
 KERNEL=="rga", MODE="0660", GROUP="video"
@@ -112,24 +108,7 @@ SUBSYSTEM=="media", MODE="0660", GROUP="video"
 SUBSYSTEM=="accel", MODE="0660", GROUP="render"
 EOF
 
-# Configure /boot/armbianEnv.txt for 1GB CMA (prevents 4K V4L2 buffer exhaustion) and vendor panthor overlay
-if [ -f /boot/armbianEnv.txt ]; then
-    grep -q "^extraargs=" /boot/armbianEnv.txt \
-        && sed -i 's/^extraargs=\(.*\)/extraargs=\1 cma=1G/' /boot/armbianEnv.txt \
-        || echo "extraargs=cma=1G" >> /boot/armbianEnv.txt
-
-    if echo "${TARGET_KERNEL}" | grep -q "vendor"; then
-        grep -q "^overlay_prefix=" /boot/armbianEnv.txt || echo "overlay_prefix=rockchip-rk3588" >> /boot/armbianEnv.txt
-        if grep -q "^overlays=" /boot/armbianEnv.txt; then
-            grep -q "panthor-gpu" /boot/armbianEnv.txt || sed -i 's/^overlays=\(.*\)/overlays=\1 panthor-gpu/' /boot/armbianEnv.txt
-        else
-            echo "overlays=panthor-gpu" >> /boot/armbianEnv.txt
-        fi
-    fi
-fi
-
 echo "=== [6/7] Configuring Chromium & Firefox Hardware Video Acceleration ==="
-# 1. Chromium flags (sourced automatically by Debian's /usr/bin/chromium launcher)
 mkdir -p /etc/chromium.d
 cat << 'EOF' > /etc/chromium.d/50-rk3588-hwaccel
 # Enable Wayland, Mali-G610 GPU rasterization, and V4L2 Zero-Copy HW video decode
@@ -141,20 +120,18 @@ export CHROMIUM_FLAGS="${CHROMIUM_FLAGS} \
   --enable-features=AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL,VaapiVideoDecoder,VaapiIgnoreDriverChecks,CanvasOopRasterization"
 EOF
 
-# 2. Build dongioia/libva-v4l2-request so Firefox VA-API talks to RK3588 V4L2 stateless decoders
+# Build dongioia/libva-v4l2-request for VA-API over mainline V4L2 stateless decoders
 rm -rf /tmp/libva-v4l2-request
-if git clone --depth 1 https://github.com/dongioia/libva-v4l2-request.git /tmp/libva-v4l2-request; then
-    cd /tmp/libva-v4l2-request
-    meson setup build --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu -Dwith_x11=yes -Dwith_wayland=yes
-    ninja -C build
+(
+    git clone --depth 1 https://github.com/dongioia/libva-v4l2-request.git /tmp/libva-v4l2-request && \
+    cd /tmp/libva-v4l2-request && \
+    meson setup build --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu/dri && \
+    ninja -C build && \
     ninja -C build install
-    cd /
-fi
+) || echo "WARNING: libva-v4l2-request optional build skipped"
 
-# 3. Configure Firefox ESR system-wide preferences for Wayland WebRender + VA-API
 mkdir -p /etc/firefox-esr
 cat << 'EOF' > /etc/firefox-esr/syspref.js
-// Force hardware WebRender on Mali-G610 (Panthor) and enable VA-API video decoding
 pref("gfx.webrender.all", true);
 pref("layers.acceleration.force-enabled", true);
 pref("media.ffmpeg.vaapi.enabled", true);
@@ -164,12 +141,15 @@ pref("media.rdd-ffmpeg.enabled", true);
 pref("widget.dmabuf.force-enabled", true);
 EOF
 
-# Set environment variables for Wayland and VA-API in GNOME sessions
 mkdir -p /etc/environment.d
 cat << 'EOF' > /etc/environment.d/90-rk3588-gpu.conf
 MOZ_ENABLE_WAYLAND=1
-LIBVA_DRIVER_NAME=v4l2_request
 EOF
+
+# Only force LIBVA_DRIVER_NAME=v4l2_request if running mainline V4L2 and the driver is installed
+if ! echo "${TARGET_KERNEL}" | grep -q "vendor" && [ -f /usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so ]; then
+    echo "LIBVA_DRIVER_NAME=v4l2_request" >> /etc/environment.d/90-rk3588-gpu.conf
+fi
 
 echo "=== [7/7] Updating initramfs with Panthor & Mali CSF firmware ==="
 grep -qxF "panthor" /etc/initramfs-tools/modules || echo "panthor" >> /etc/initramfs-tools/modules
