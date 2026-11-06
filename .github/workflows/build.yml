@@ -1,0 +1,61 @@
+# File: .github/workflows/build.yml
+name: Build Armbian NanoPC-T6 Trixie GNOME (GPU + Video + Coral TPU + NPU)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: "current = Mainline 6.18 (Native Chromium/Firefox V4L2 + 1GHz NPU), vendor = Rockchip 6.1 BSP"
+        required: true
+        default: "current"
+        type: choice
+        options:
+          - current
+          - vendor
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm # Native ARM64 runner (or use ubuntu-latest)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                     /usr/local/lib/android \
+                     /opt/ghc \
+                     /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - name: Fetch RK3588 Rocket NPU 1GHz DVFS Patch Series (for Mainline 6.18)
+        if: ${{ inputs.kernel_branch == 'current' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y b4 git
+
+          PATCH_DEST="userpatches/kernel/archive/rockchip64-6.18"
+          mkdir -p "${PATCH_DEST}"
+
+          b4 am -o /tmp/rocket-dvfs 20260922080114.44662-1-royalnet026@gmail.com
+          git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/*.mbx
+          for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
+            num=$(basename "$f")
+            mv "$f" "${PATCH_DEST}/zz-rocket-dvfs-${num}.patch"
+          done
+          ls -la "${PATCH_DEST}"
+
+      - name: Build Armbian Image
+        uses: armbian/build@main
+        with:
+          armbian_token: ${{ secrets.GITHUB_TOKEN }}
+          armbian_target: "build"
+          armbian_board: "nanopct6"
+          armbian_release: "trixie"
+          armbian_ui: "gnome"
+          armbian_kernel_branch: ${{ inputs.kernel_branch }}
+          armbian_extensions: "dkms-headers,mesa-vpu"
+          armbian_compress: "sha,img,xz"
