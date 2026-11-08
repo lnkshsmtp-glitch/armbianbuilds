@@ -1,5 +1,9 @@
 # File: userpatches/extensions/dkms-headers.sh
 
+function add_host_dependencies__rocket_npu_b4() {
+    EXTRA_BUILD_DEPS+=("b4")
+}
+
 function extension_prepare_config__install_headers_gpu_and_dkms() {
     display_alert "Configuring kernel headers, Panthor GPU, Browser HW Accel, and DKMS" "${EXTENSION}" "info"
 
@@ -22,45 +26,64 @@ function extension_prepare_config__install_headers_gpu_and_dkms() {
 
 function extension_finish_config__rk3588_fetch_rocket_dvfs_patches() {
     if [[ "${BRANCH}" == "current" ]]; then
-        # KERNELPATCHDIR is populated before extension_finish_config; fallback ensures it is never empty
-        local rel_dir="${KERNELPATCHDIR:-archive/rockchip64-6.18}"
+        local rel_dir="archive/${LINUXFAMILY:-rockchip64}-${KERNEL_MAJOR_MINOR:-6.18}"
         local upatch_dir="${USERPATCHES_PATH}/kernel/${rel_dir}"
         local mpatch_dir="${SRC}/patch/kernel/${rel_dir}"
         mkdir -p "${upatch_dir}" "${mpatch_dir}"
 
-        if [[ ! -f "${mpatch_dir}/zz-rocket-dvfs-0011.patch" ]]; then
-            display_alert "Installing b4 in container and fetching 11 Rocket NPU DVFS patches into ${rel_dir}" "${EXTENSION}" "info"
-            if ! command -v b4 >/dev/null 2>&1; then
-                apt-get update >&2
-                apt-get install -y b4 git >&2
-            fi
+        # Clean out any old 0001..0011 patches from patch dirs so patching.py doesn't trip on 6.18.62 backports
+        rm -f "${upatch_dir}/"zz-rocket-dvfs-*.patch "${mpatch_dir}/"zz-rocket-dvfs-*.patch
 
-            rm -rf /tmp/rocket-dvfs /tmp/rocket-split
-            mkdir -p /tmp/rocket-dvfs /tmp/rocket-split
-
-            b4 am --no-cover -o /tmp/rocket-dvfs -n series.mbx 20260922080114.44662-1-royalnet026@gmail.com >&2
-            git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/series.mbx >&2
-
-            for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
-                local num
-                num=$(basename "$f")
-                cp -f "$f" "${upatch_dir}/zz-rocket-dvfs-${num}.patch"
-                mv "$f" "${mpatch_dir}/zz-rocket-dvfs-${num}.patch"
-            done
-            rm -rf /tmp/rocket-dvfs /tmp/rocket-split
+        display_alert "Fetching 11 Rocket NPU 1GHz DVFS patches via b4" "${EXTENSION}" "info"
+        if ! command -v b4 >/dev/null 2>&1; then
+            apt-get update >&2
+            apt-get install -y b4 git >&2
         fi
 
-        local patch_count
-        patch_count=$(find "${mpatch_dir}" -maxdepth 1 -name "zz-rocket-dvfs-*.patch" 2>/dev/null | wc -l)
-        display_alert "Verified ${patch_count} Rocket NPU DVFS patches in ${mpatch_dir}" "${EXTENSION}" "info"
-        if [[ "${patch_count}" -lt 11 ]]; then
-            exit_with_error "Expected 11 zz-rocket-dvfs patches in ${mpatch_dir}, found ${patch_count}"
-        fi
+        rm -rf /tmp/rocket-dvfs /tmp/rocket-split
+        mkdir -p /tmp/rocket-dvfs /tmp/rocket-split
+
+        b4 am --no-cover -o /tmp/rocket-dvfs -n series.mbx 20260922080114.44662-1-royalnet026@gmail.com >&2
+        git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/series.mbx >&2
+
+        # Stage ONLY 0006 (DT binding doc) into Armbian's patch dir to change the Pxxxx cache hash
+        # and force a source kernel build without triggering reversed-patch errors in patching.py
+        cp -f /tmp/rocket-split/0006 "${upatch_dir}/zz-rocket-dvfs-0006.patch"
+        cp -f /tmp/rocket-split/0006 "${mpatch_dir}/zz-rocket-dvfs-0006.patch"
     fi
 }
 
 function custom_kernel_config__rk3588_gpu_vpu_npu() {
     if [[ "${BRANCH}" == "current" ]]; then
+        # Locate the active kernel source worktree
+        local ksrc_dir="${pwd}"
+        if [[ ! -d "${ksrc_dir}/drivers/accel/rocket" ]]; then
+            local rocket_file
+            rocket_file=$(find "${SRC}/cache/sources" -path "*/drivers/accel/rocket/rocket_device.c" 2>/dev/null | head -n 1)
+            ksrc_dir="${rocket_file%/drivers/accel/rocket/rocket_device.c}"
+        fi
+
+        if [[ -d "${ksrc_dir}/drivers/accel/rocket" ]] && [[ -d /tmp/rocket-split ]]; then
+            display_alert "Applying unmerged Rocket NPU 1GHz DVFS patches to ${ksrc_dir}" "${EXTENSION}" "info"
+            pushd "${ksrc_dir}" >/dev/null
+            for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
+                local num
+                num=$(basename "$f")
+                if patch -p1 --dry-run -R --force < "$f" >/dev/null 2>&1; then
+                    display_alert "Skipping patch ${num} (already merged in upstream 6.18.x)" "${EXTENSION}" "info"
+                else
+                    display_alert "Applying Rocket NPU DVFS patch ${num}" "${EXTENSION}" "info"
+                    patch -p1 --forward --fuzz=3 -r - < "$f" >&2 || true
+                fi
+            done
+            popd >/dev/null
+
+            if ! grep -rq "opp-table-npu" "${ksrc_dir}/arch/arm64/boot/dts/rockchip/"; then
+                exit_with_error "opp-table-npu missing from rk3588 device tree after patching!"
+            fi
+            display_alert "Verified opp-table-npu and rocket devfreq in kernel tree" "${EXTENSION}" "info"
+        fi
+
         display_alert "Enabling Panthor GPU, V4L2 Stateless VPU, and Rocket NPU DVFS configs" "${EXTENSION}" "info"
         opts_y+=(
             "CONFIG_DRM_ACCEL"
