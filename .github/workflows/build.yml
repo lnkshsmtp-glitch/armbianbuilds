@@ -20,15 +20,34 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm # Native ARM64 runner (or use ubuntu-latest)
     steps:
-      - name: Free up runner disk space and install b4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free up runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet \
                      /usr/local/lib/android \
                      /opt/ghc \
                      /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - name: Fetch RK3588 Rocket NPU 1GHz DVFS Patch Series (11 patches)
+        if: ${{ inputs.kernel_branch == 'current' }}
+        run: |
           sudo apt-get update
           sudo apt-get install -y b4 git
-          df -h
+
+          PATCH_REL="userpatches/kernel/archive/rockchip64-6.18"
+          mkdir -p "${PATCH_REL}" "custom/${PATCH_REL}" /tmp/rocket-dvfs /tmp/rocket-split
+
+          b4 am --no-cover -o /tmp/rocket-dvfs -n series.mbx 20260922080114.44662-1-royalnet026@gmail.com
+          git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/series.mbx
+          for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
+            num=$(basename "$f")
+            cp "$f" "${PATCH_REL}/zz-rocket-dvfs-${num}.patch"
+            mv "$f" "custom/${PATCH_REL}/zz-rocket-dvfs-${num}.patch"
+          done
+          ls -la "custom/${PATCH_REL}"
 
       - name: Build Armbian Image
         uses: armbian/build@main
