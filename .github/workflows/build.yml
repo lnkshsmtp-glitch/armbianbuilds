@@ -58,5 +58,6 @@ jobs:
           armbian_release: "trixie"
           armbian_ui: "gnome"
           armbian_kernel_branch: ${{ inputs.kernel_branch }}
+          armbian_runner_clean: "yes" # recommended for Github runners
           armbian_extensions: "dkms-headers"
           armbian_compress: "sha,img,xz"
