@@ -1,41 +1,13 @@
 # File: userpatches/extensions/dkms-headers.sh
 
-# Immediately inject staged Rocket NPU DVFS patches into Armbian's main patch/ tree
-# when this extension is sourced so artifact_kernel_prepare_version() changes the Pxxxx hash
-# and compiles the 6.18 kernel + DTB from source instead of pulling the unpatched OCI cache.
-if [[ -d "${SRC}/userpatches/kernel/archive/rockchip64-6.18" ]] && [[ -d "${SRC}/patch/kernel/archive/rockchip64-6.18" ]]; then
-    if compgen -G "${SRC}/userpatches/kernel/archive/rockchip64-6.18/zz-rocket-dvfs-*.patch" > /dev/null; then
-        cp -f "${SRC}/userpatches/kernel/archive/rockchip64-6.18/"zz-rocket-dvfs-*.patch \
-              "${SRC}/patch/kernel/archive/rockchip64-6.18/"
-    fi
-fi
-
-function post_family_config__rk3588_overlays_and_patches() {
-    if [[ "${BRANCH}" == "vendor" ]]; then
-        display_alert "Enabling panthor-gpu DT overlay for vendor kernel" "${EXTENSION}" "info"
-        declare -g DEFAULT_OVERLAYS="panthor-gpu"
-    elif [[ "${BRANCH}" == "current" ]]; then
-        local upatch_dir="${USERPATCHES_PATH}/kernel/archive/rockchip64-6.18"
-        local mpatch_dir="${SRC}/patch/kernel/${KERNELPATCHDIR}"
-        mkdir -p "${mpatch_dir}"
-
-        if compgen -G "${upatch_dir}/zz-rocket-dvfs-*.patch" > /dev/null; then
-            cp -f "${upatch_dir}/"zz-rocket-dvfs-*.patch "${mpatch_dir}/"
-        fi
-
-        local patch_count
-        patch_count=$(find "${mpatch_dir}" -maxdepth 1 -name "zz-rocket-dvfs-*.patch" 2>/dev/null | wc -l)
-        display_alert "Verified ${patch_count} Rocket NPU DVFS patches in ${mpatch_dir}" "${EXTENSION}" "info"
-        if [[ "${patch_count}" -lt 11 ]]; then
-            exit_with_error "Expected 11 zz-rocket-dvfs patches in ${mpatch_dir}, found ${patch_count}"
-        fi
-    fi
-}
-
 function extension_prepare_config__install_headers_gpu_and_dkms() {
     display_alert "Configuring kernel headers, Panthor GPU, Browser HW Accel, and DKMS" "${EXTENSION}" "info"
 
     export INSTALL_HEADERS="yes"
+
+    if [[ "${BRANCH}" == "vendor" ]]; then
+        declare -g DEFAULT_OVERLAYS="panthor-gpu"
+    fi
 
     add_packages_to_image \
         dkms build-essential bc kmod cpio flex bison \
@@ -46,6 +18,45 @@ function extension_prepare_config__install_headers_gpu_and_dkms() {
         libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libgbm1 \
         mesa-vulkan-drivers mesa-va-drivers mesa-utils vulkan-tools \
         chromium firefox-esr mpv
+}
+
+function extension_finish_config__rk3588_fetch_rocket_dvfs_patches() {
+    if [[ "${BRANCH}" == "current" ]]; then
+        # KERNELPATCHDIR is populated before extension_finish_config; fallback ensures it is never empty
+        local rel_dir="${KERNELPATCHDIR:-archive/rockchip64-6.18}"
+        local upatch_dir="${USERPATCHES_PATH}/kernel/${rel_dir}"
+        local mpatch_dir="${SRC}/patch/kernel/${rel_dir}"
+        mkdir -p "${upatch_dir}" "${mpatch_dir}"
+
+        if [[ ! -f "${mpatch_dir}/zz-rocket-dvfs-0011.patch" ]]; then
+            display_alert "Installing b4 in container and fetching 11 Rocket NPU DVFS patches into ${rel_dir}" "${EXTENSION}" "info"
+            if ! command -v b4 >/dev/null 2>&1; then
+                apt-get update >&2
+                apt-get install -y b4 git >&2
+            fi
+
+            rm -rf /tmp/rocket-dvfs /tmp/rocket-split
+            mkdir -p /tmp/rocket-dvfs /tmp/rocket-split
+
+            b4 am --no-cover -o /tmp/rocket-dvfs -n series.mbx 20260922080114.44662-1-royalnet026@gmail.com >&2
+            git mailsplit -o/tmp/rocket-split /tmp/rocket-dvfs/series.mbx >&2
+
+            for f in /tmp/rocket-split/[0-9][0-9][0-9][0-9]; do
+                local num
+                num=$(basename "$f")
+                cp -f "$f" "${upatch_dir}/zz-rocket-dvfs-${num}.patch"
+                mv "$f" "${mpatch_dir}/zz-rocket-dvfs-${num}.patch"
+            done
+            rm -rf /tmp/rocket-dvfs /tmp/rocket-split
+        fi
+
+        local patch_count
+        patch_count=$(find "${mpatch_dir}" -maxdepth 1 -name "zz-rocket-dvfs-*.patch" 2>/dev/null | wc -l)
+        display_alert "Verified ${patch_count} Rocket NPU DVFS patches in ${mpatch_dir}" "${EXTENSION}" "info"
+        if [[ "${patch_count}" -lt 11 ]]; then
+            exit_with_error "Expected 11 zz-rocket-dvfs patches in ${mpatch_dir}, found ${patch_count}"
+        fi
+    fi
 }
 
 function custom_kernel_config__rk3588_gpu_vpu_npu() {
@@ -78,9 +89,8 @@ function post_install_kernel_debs__verify_dkms_build_symlink() {
 }
 
 function pre_umount_final_image__configure_rk3588_rootfs_and_env() {
-    display_alert "Guaranteeing udev rules, browser flags, and /boot/armbianEnv.txt in ${SDCARD}" "${EXTENSION}" "info"
+    display_alert "Writing udev rules, browser flags, and /boot/armbianEnv.txt to ${SDCARD}" "${EXTENSION}" "info"
 
-    # 1. Guarantee udev rules for Panthor Mutter, VPU/NPU, and Coral Apex exist in ${SDCARD}
     mkdir -p "${SDCARD}/etc/udev/rules.d"
     cat << 'EOF' > "${SDCARD}/etc/udev/rules.d/61-mutter-panthor.rules"
 SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="panthor", TAG+="mutter-device-preferred-primary"
@@ -101,7 +111,6 @@ SUBSYSTEM=="media", MODE="0660", GROUP="video"
 SUBSYSTEM=="accel", MODE="0660", GROUP="render"
 EOF
 
-    # 2. Guarantee Chromium & Firefox HW acceleration configs exist in ${SDCARD}
     mkdir -p "${SDCARD}/etc/chromium.d" "${SDCARD}/etc/firefox-esr" "${SDCARD}/etc/environment.d"
     cat << 'EOF' > "${SDCARD}/etc/chromium.d/50-rk3588-hwaccel"
 export CHROMIUM_FLAGS="${CHROMIUM_FLAGS} --ozone-platform-hint=auto --enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist --enable-features=AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL,VaapiVideoDecoder,VaapiIgnoreDriverChecks,CanvasOopRasterization"
@@ -117,7 +126,6 @@ pref("media.rdd-ffmpeg.enabled", true);
 pref("widget.dmabuf.force-enabled", true);
 EOF
 
-    # 3. Update /boot/armbianEnv.txt in BOTH ${SDCARD}/boot and ${MOUNT}/boot
     for env_file in "${SDCARD}/boot/armbianEnv.txt" "${MOUNT}/boot/armbianEnv.txt"; do
         if [[ -f "${env_file}" ]]; then
             display_alert "Updating ${env_file} with cma=1G and GPU overlays" "${EXTENSION}" "info"
