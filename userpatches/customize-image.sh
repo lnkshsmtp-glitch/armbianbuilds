@@ -88,7 +88,6 @@ apt-get install -y -t trixie-backports \
     libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libgbm1 \
     mesa-vulkan-drivers mesa-va-drivers || true
 
-# Safe firmware check: do not cp over self if arch10.8/mali_csffw.bin is already a symlink to /lib/firmware/mali_csffw.bin
 mkdir -p /lib/firmware/arm/mali/arch10.8
 if [ ! -e /lib/firmware/arm/mali/arch10.8/mali_csffw.bin ]; then
     curl -fsSL "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/arm/mali/arch10.8/mali_csffw.bin" \
@@ -153,7 +152,6 @@ echo "=== [7/7] Updating initramfs and cleaning APT caches ==="
 grep -qxF "panthor" /etc/initramfs-tools/modules || echo "panthor" >> /etc/initramfs-tools/modules
 update-initramfs -u -k "${TARGET_KERNEL}"
 
-# Clean temporary build files and APT lists/caches to prevent Armbian SDCARD APT warnings
 rm -rf /tmp/gasket-driver /tmp/libedgetpu1-std.deb /tmp/libedgetpu1-std-trixie.deb /tmp/edgetpu-pkg /tmp/libva-v4l2-request
 apt-get clean
 rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/* /var/cache/apt/*.bin || true
